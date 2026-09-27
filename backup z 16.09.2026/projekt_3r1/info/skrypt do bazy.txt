@@ -1,0 +1,119 @@
+-- Używamy bazy danych projekt_3r1
+USE projekt_3r1;
+
+-- 1. USUNIĘCIE I PONOWNE UTWORZENIE TABELI EMP
+-- To usunie całą tabelę EMP i jej zawartość!
+DROP TABLE IF EXISTS emp;
+
+-- Utworzenie tabeli EMP zgodnie ze schematem projekt_3r1.sql
+CREATE TABLE emp (
+ id INT AUTO_INCREMENT PRIMARY KEY,
+ first_name VARCHAR(50),
+ last_name VARCHAR(50),
+ email VARCHAR(150) UNIQUE,
+ password_hash VARCHAR(255) DEFAULT NULL,
+ role_id INT DEFAULT NULL,
+ dept_id INT DEFAULT NULL,
+ title_id INT DEFAULT NULL,
+ region_id INT DEFAULT NULL,
+ pesel VARCHAR(11),
+ phone VARCHAR(20),
+ address TEXT,
+ city VARCHAR(100),
+ postal_code VARCHAR(10),
+ country VARCHAR(50),
+ birth_date DATE,
+ hire_date DATE,
+ active TINYINT(1) DEFAULT 1
+);
+
+-- 2. WSTAWIANIE REKORDÓW Z PRAWIDŁOWYMI HASHAMI
+-- Hasła: admin123, hr123, kierownik123, magazyn123
+
+INSERT INTO emp (
+    id, first_name, last_name, email, password_hash, role_id, dept_id, title_id, region_id, pesel, phone, address, city, postal_code, country, birth_date, hire_date, active
+) VALUES
+-- 1. Bartosz Barański (ADMIN) | Hasło: admin123
+(
+    10, 
+    'Bartosz', 
+    'Barański', 
+    'bartek@sklep.pl', 
+    '$2y$10$qSflROriv9NqrcXz5X1mO.DMsCQvmR3L0QrdnkBN4UByduDdhdwTq', 
+    1, 
+    NULL, 
+    NULL, 
+    NULL, 
+    '92020254321', 
+    '501200300', 
+    'ul. Warszawska 15', 
+    'Kielce', 
+    '25-002', 
+    'Polska', 
+    NULL, 
+    '2025-11-13', 
+    1
+),
+-- 2. Nikodem Kowalski (HR) | Hasło: hr123
+(
+    9, 
+    'Nikodem', 
+    'Kowalski', 
+    'nikodem@sklep.pl', 
+    '$2y$10$lgr7dncBxsOxHsfZh8VvK.gk6E78WpVT7Vc2DadC0YQ/h3GNZ32tG', 
+    2, 
+    NULL, 
+    NULL, 
+    NULL, 
+    '90010112345', 
+    '500100200', 
+    'ul. Główna 1', 
+    'Kielce', 
+    '25-001', 
+    'Polska', 
+    NULL, 
+    '2025-11-13', 
+    1
+),
+-- 3. Wojciech Majchrzyk (KIEROWNIK) | Hasło: kierownik123
+(
+    11, 
+    'Wojciech', 
+    'Majchrzyk', 
+    'wojtek@sklep.pl', 
+    '$2y$10$BNnUn/H0QIdysbr/CDj2du26vdN5LgynuSN3CGHzTbZPTxgWM25rC', 
+    3, 
+    NULL, 
+    NULL, 
+    NULL, 
+    '94030367890', 
+    '502300400', 
+    'ul. Krakowska 20', 
+    'Kielce', 
+    '25-003', 
+    'Polska', 
+    NULL, 
+    '2025-11-13', 
+    1
+),
+-- 4. Kamil Lis (MAGAZYN) | Hasło: magazyn123
+(
+    12, 
+    'Kamil', 
+    'Lis', 
+    'kamil@sklep.pl', 
+    '$2y$10$PeNQt1RH2MfDmUx5S513f..Ko0Or3PK1b9ATR.mCgBE0vnOo4nD0S', 
+    4, 
+    NULL, 
+    NULL, 
+    NULL, 
+    '95040412345', 
+    '503400500', 
+    'ul. Długa 5', 
+    'Kielce', 
+    '25-004', 
+    'Polska', 
+    NULL, 
+    '2025-11-13', 
+    1
+);

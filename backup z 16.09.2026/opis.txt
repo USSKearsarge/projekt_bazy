@@ -1,0 +1,31 @@
+UWAGI:
+
+HERMETYZACJA PROJEKTU POPRZEZ UTWORZENIE DEDYKOWANEJ BAZY DANYCH!!!
+
+1. Etykiety z lewej strony pól formularza
+2. Lista wyboru mieszcząca się na ekranie i przycisk "szczegóły"
+3. Filtr przy klientach i pracownikach, zleceniach 
+4. Brak pozycji zamówień
+5. usunąć nazwy tabel z formularzy
+6. Logika usuwania obiektów (zablokować, jeśli użyto)
+7. Weryfikacja cennika
+9: generator danych: cienki dosyć - powtarzają się emaile, co powoduje błędy, brak unikalności username
+------------------------------------------------------
+10. Jaka powinna być nazwa bazy podczas importu?
+11. Brak przykładowego logowania dla klienta
+12. Dodać zmiany ilości w koszyku
+13. Brak możliwości zmiany kilku danych w edycji klienta (np.edycja miasta)
+14. Brakuje nazwy regionów oraz nazw pracowników
+15. Brak możliwości dokonania zmian w "Ustawieniach Projektu"   (#???)
+16. Należy dodać filtr wyszukiwania dla pracowników
+    (wyszukiwarka przy liście pracowników po imieniu i nazwisku)
+17. Dodać blokady na ilość produktów (wyrzuca ujemne liczby przy wysokich liczbach)
+18. Błąd podczas edycji uprawnień (zamiast edycji dodaje nowe)
+19. Brak możliwości edycji cenników
+20. W liście ról dodać kolumnę z opisem roli
+
+
+
+ 
+
+
