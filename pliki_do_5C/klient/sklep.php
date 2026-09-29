@@ -14,38 +14,6 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         if(isset($_SESSION['cart'][$pid])) $_SESSION['cart'][$pid] += $qty; else $_SESSION['cart'][$pid] = $qty;
     }
     if(isset($_POST['clear_cart'])){ unset($_SESSION['cart']); }
-    if(isset($_POST['place_order'])){
-        $cart = $_SESSION['cart'] ?? [];
-        $adres = trim($_POST['adres'] ?? '');
-        $platnosc = $_POST['platnosc'] ?? '';
-        if(empty($cart)){
-            $msg = 'Koszyk jest pusty.';
-        } elseif($adres === '' || $platnosc === ''){
-            $msg = 'Podaj adres i wybierz sposób płatności.';
-        } else {
-            $ids = array_keys($cart);
-            $placeholders = implode(',', array_fill(0,count($ids),'?'));
-            $stmt = $pdo->prepare("SELECT id,suggested_price FROM product WHERE id IN ($placeholders)");
-            $stmt->execute($ids);
-            $products = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-            $total = 0.0;
-            foreach($cart as $pid=>$q){ $price = $products[$pid] ?? 0; $total += $price * $q; }
-            $stmt = $pdo->prepare('INSERT INTO ord (customer_id,date_ordered,total,payment_type,status) VALUES (?,?,?,?,?)');
-            $stmt->execute([
-                $_SESSION['klient_id'], date('Y-m-d H:i:s'), $total, $platnosc, $adres, 'Oczekujące'
-            ]);
-            $ord_id = $pdo->lastInsertId();
-            $itemStmt = $pdo->prepare('INSERT INTO item (ord_id,item_id,product_id,price,gross,quantity,quantity_shipper) VALUES (?,?,?,?,?,?)');
-            $i = 1;
-            foreach($cart as $pid=>$q){
-                $price = $products[$pid] ?? 0;
-                $itemStmt->execute([$ord_id, $i, $pid, $price, $q, 0]);
-                $i++;
-            }
-            unset($_SESSION['cart']);
-            $msg = 'Zamówienie zostało złożone (ID: '.$ord_id.').';
-        }
-    }
 }
 
 include 'szablony/naglowek.php';
