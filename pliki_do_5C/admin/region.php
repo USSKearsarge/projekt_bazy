@@ -1,41 +1,52 @@
 <?php
- //Załęski
+//Załęski
 require '../cfg.php';
+require 'csrf.php';
 
-if(!isset($_SESSION['zalogowany'])){
-    header('Location: logowanie.php');
-    exit;
-}
+require 'auth.php';
+require_access(['magazyn', 'warehouse']);
 
-$rola_id = $_SESSION['rola_id'] ?? 0;
-if (!in_array($rola_id, [1, 2, 3, 4])) {
-    header('Location: index.php');
-    exit;
-}
+$canManage = can_write(['magazyn', 'warehouse']);
+$err = '';
 
-$canManage = in_array($rola_id, [1, 2, 3]);
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    $action = $_POST['action'] ?? '';
 
-if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save') {
-    $id = isset($_POST['id']) && $_POST['id'] !== '' ? (int)$_POST['id'] : null;
-    $nazwa = trim($_POST['nazwa'] ?? '');
-    if ($id) {
-        $s = $pdo->prepare('UPDATE region SET nazwa=? WHERE id=?');
-        $s->execute([$nazwa, $id]);
-    } else {
-        $s = $pdo->prepare('INSERT INTO region (nazwa) VALUES (?)');
-        $s->execute([$nazwa]);
+    try {
+        if ($action === 'save') {
+            $id = isset($_POST['id']) && $_POST['id'] !== '' ? (int)$_POST['id'] : null;
+            $name = trim($_POST['name'] ?? '');
+
+            if ($name === '' || mb_strlen($name) > 50) {
+                $err = 'Nazwa jest wymagana (maks. 50 znaków).';
+            } else {
+                if ($id) {
+                    $s = $pdo->prepare('UPDATE region SET name = ? WHERE id = ?');
+                    $s->execute([$name, $id]);
+                } else {
+                    $s = $pdo->prepare('INSERT INTO region (name) VALUES (?)');
+                    $s->execute([$name]);
+                }
+                header('Location: region.php');
+                exit;
+            }
+        } elseif ($action === 'delete') {
+            $did = (int)($_POST['id'] ?? 0);
+            $d = $pdo->prepare('DELETE FROM region WHERE id = ?');
+            $d->execute([$did]);
+            header('Location: region.php');
+            exit;
+        }
+    } catch (PDOException $e) {
+        // 1451 = rekord jest używany przez inną tabelę (klucz obcy)
+        $err = ($e->errorInfo[1] ?? 0) === 1451
+            ? 'Nie można usunąć regionu, ponieważ jest używany (magazyny, klienci lub działy).'
+            : 'Błąd bazy danych podczas zapisu.';
     }
-    header('Location: region.php'); exit;
-}
-if ($canManage && isset($_GET['action']) && $_GET['action']==='delete' && isset($_GET['id'])) {
-    $did = (int)$_GET['id'];
-    $d = $pdo->prepare('DELETE FROM region WHERE id = ?');
-    $d->execute([$did]);
-    header('Location: region.php'); exit;
 }
 
-$stmt = $pdo->query("SELECT * FROM region ORDER BY id");
-$rows = $stmt->fetchAll();
+$rows = $pdo->query("SELECT * FROM region ORDER BY id")->fetchAll();
 
 include 'szablony/naglowek.php';
 ?>
@@ -46,21 +57,28 @@ include 'szablony/naglowek.php';
 </div>
 <p class="lead">Lista regionów przypisanych do magazynów.</p>
 
+<?php if ($err): ?>
+    <div class="alert alert-danger" role="alert"><?php echo htmlspecialchars($err); ?></div>
+<?php endif; ?>
+
 <?php
 $act = $_GET['action'] ?? '';
 $edit = null;
 if ($canManage && $act === 'edit' && isset($_GET['id'])) {
-    $eid = (int)$_GET['id']; $s = $pdo->prepare('SELECT * FROM region WHERE id = ?'); $s->execute([$eid]); $edit = $s->fetch();
+    $s = $pdo->prepare('SELECT * FROM region WHERE id = ?');
+    $s->execute([(int)$_GET['id']]);
+    $edit = $s->fetch() ?: null;
 }
-if ($canManage && in_array($act, ['add','edit'])):
+if ($canManage && in_array($act, ['add', 'edit'], true)):
     $idVal = $edit['id'] ?? '';
-    $nazwaVal = $edit['nazwa'] ?? '';
+    $nameVal = $edit['name'] ?? '';
 ?>
     <form method="post" class="mb-4">
+        <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="save">
-        <input type="hidden" name="id" value="<?php echo htmlspecialchars($idVal); ?>">
+        <input type="hidden" name="id" value="<?php echo htmlspecialchars((string)$idVal); ?>">
         <div class="row g-2">
-            <div class="col-md-6"><input class="form-control" name="nazwa" placeholder="Nazwa" value="<?php echo htmlspecialchars($nazwaVal); ?>"></div>
+            <div class="col-md-6"><input class="form-control" name="name" placeholder="Nazwa" maxlength="50" required value="<?php echo htmlspecialchars($nameVal); ?>"></div>
             <div class="col-md-12 mt-2"><button class="btn btn-success">Zapisz</button> <a class="btn btn-secondary" href="region.php">Anuluj</a></div>
         </div>
     </form>
@@ -78,8 +96,13 @@ if ($canManage && in_array($act, ['add','edit'])):
             <?php foreach ($rows as $r): ?><tr>
                 <?php foreach ($r as $v): ?><td><?php echo htmlspecialchars((string)$v); ?></td><?php endforeach; ?>
                 <?php if ($canManage): ?><td>
-                    <a class="btn btn-sm btn-outline-primary" href="region.php?action=edit&id=<?php echo urlencode($r['id']); ?>">Edytuj</a>
-                    <a class="btn btn-sm btn-outline-danger" href="region.php?action=delete&id=<?php echo urlencode($r['id']); ?>" onclick="return confirm('Usunąć region?');">Usuń</a>
+                    <a class="btn btn-sm btn-outline-primary" href="region.php?action=edit&id=<?php echo urlencode((string)$r['id']); ?>">Edytuj</a>
+                    <form method="post" class="d-inline" onsubmit="return confirm('Usunąć region?');">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="id" value="<?php echo htmlspecialchars((string)$r['id']); ?>">
+                        <button class="btn btn-sm btn-outline-danger">Usuń</button>
+                    </form>
                 </td><?php endif; ?>
             </tr><?php endforeach; ?>
         </tbody>

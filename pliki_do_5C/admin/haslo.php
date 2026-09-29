@@ -1,8 +1,8 @@
-
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) session_start();
 
 require '../cfg.php';
+require 'csrf.php';
 
 //czy zalogowany
 if (!isset($_SESSION['zalogowany'])) {
@@ -11,7 +11,7 @@ if (!isset($_SESSION['zalogowany'])) {
 }
 
 // Pobranie ID zalogowanego pracownika
-$eid = $_SESSION['eid'] ?? null;
+$eid = $_SESSION['user_id'] ?? $_SESSION['eid'] ?? null;
 
 if (!$eid) {
     header('Location: index.php');
@@ -25,6 +25,7 @@ if (!$eid) {
 $message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
 
     $current = $_POST['current'] ?? '';
     $new = $_POST['new'] ?? '';
@@ -33,6 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($new === '' || $confirm === '' || $current === '') {
 
         $message = 'Wypełnij wszystkie pola.';
+
+    } elseif (mb_strlen($new) < 8) {
+
+        $message = 'Nowe hasło musi mieć co najmniej 8 znaków.';
 
     } elseif ($new !== $confirm) {
 
@@ -82,6 +87,7 @@ include 'szablony/naglowek.php';
 <?php endif; ?>
 
 <form method="post">
+    <?php echo csrf_field(); ?>
 
     <div class="mb-3">
         <label>Aktualne hasło</label>

@@ -1,44 +1,46 @@
 <?php
-// Plik: permission.php | Tabela: permissions | Link: Uprawnienia | Kto widzi: ADMIN (1), HR (2)
+// permission.php | Tabela: permissions (username, menu_id, type) | dostęp: menu 'hr'
 require '../cfg.php';
-// poprawił Piotrowski
-if(!isset($_SESSION['zalogowany'])){
+
+if (!isset($_SESSION['zalogowany'])) {
     header('Location: logowanie.php');
     exit;
 }
 
-$rola_id = $_SESSION['rola_id'] ?? 0;
-if (!in_array($rola_id, [1, 2])) {
+$perms = $_SESSION['perms'] ?? [];
+if (!isset($perms['hr'])) {
     header('Location: index.php');
     exit;
 }
 
-$stmt = $pdo->query("SELECT * FROM permissions ORDER BY username, menu");
-$rows = $stmt->fetchAll();
+// W tabeli nie ma kolumny "menu" – jest menu_id (nazwę menu dobieramy z tabeli menu)
+$rows = $pdo->query(
+    'SELECT p.username, p.menu_id, m.name AS menu_name, p.type
+     FROM permissions p
+     LEFT JOIN menu m ON p.menu_id = m.id
+     ORDER BY p.username, p.menu_id'
+)->fetchAll(PDO::FETCH_ASSOC);
 
 include 'szablony/naglowek.php';
 ?>
 
 <h2>Uprawnienia (Tabela: PERMISSIONS)</h2>
-<p class="lead">Lista uprawnień systemowych.</p>
+<p class="lead">Lista uprawnień systemowych (R = odczyt, W = zapis).</p>
 
 <?php if (count($rows) === 0): ?>
     <p>Brak rekordów.</p>
 <?php else: ?>
     <table class="table table-hover table-sm">
         <thead class="table-dark">
-            <tr>
-                <?php foreach (array_keys($rows[0]) as $col): ?>
-                    <th><?php echo htmlspecialchars($col); ?></th>
-                <?php endforeach; ?>
-            </tr>
+            <tr><th>Użytkownik</th><th>Menu ID</th><th>Menu</th><th>Typ</th></tr>
         </thead>
         <tbody>
             <?php foreach ($rows as $r): ?>
                 <tr>
-                    <?php foreach ($r as $v): ?>
-                        <td><?php echo htmlspecialchars((string)$v); ?></td>
-                    <?php endforeach; ?>
+                    <td><?php echo htmlspecialchars($r['username']); ?></td>
+                    <td><?php echo htmlspecialchars($r['menu_id']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$r['menu_name']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$r['type']); ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>

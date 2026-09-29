@@ -2,16 +2,8 @@
 // Plik: warehouse.php | Tabela: warehouse | Link: Zarządzanie Magazynami | Kto widzi: ADMIN (1), MAGAZYN (4)
 require '../cfg.php';
 
-if(!isset($_SESSION['zalogowany'])){
-    header('Location: logowanie.php');
-    exit;
-}
-
-$rola_id = $_SESSION['rola_id'] ?? 0;
-if (!in_array($rola_id, [1, 4])) {
-    header('Location: index.php');
-    exit;
-}
+require 'auth.php';
+require_access(['warehouse', 'magazyn']);
 
 // Zmodyfikowane zapytanie, które pobiera powiązane dane z tabel region i emp (zamiast wyświetlać samo ID)
 $sql = "SELECT 

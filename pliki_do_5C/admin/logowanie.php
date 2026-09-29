@@ -1,7 +1,6 @@
 <?php
 // logowanie.php
 
-session_start();
 require '../cfg.php';
 
 $error = '';
@@ -30,11 +29,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $u = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$u) {
-    $error = 'Nie znaleziono użytkownika: ' . htmlspecialchars($email);
+    $error = 'Nieprawidłowy e-mail lub hasło.';
 } elseif (empty($u['password_hash'])) {
     $error = 'Użytkownik nie ma ustawionego hasła.';
 } elseif (!password_verify($haslo, $u['password_hash'])) {
-    $error = 'Hasło jest nieprawidłowe.';
+    $error = 'Nieprawidłowy e-mail lub hasło.';
 } else {
 
 
@@ -52,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Dane zalogowanego użytkownika
             $_SESSION['zalogowany'] = true;
             $_SESSION['user_id']    = $u['id'];
+            $_SESSION['eid']        = $u['id']; // zgodność ze starszymi stronami (np. haslo.php)
             $_SESSION['imie']       = $u['first_name'];
             $_SESSION['username']   = $u['username'];
 
@@ -77,13 +77,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['perms'] = $perms; // np. ['hr' => 'W', 'magazyn' => 'R']
 
+
             header('Location: index.php');
             exit;
 
 
         }
 
-        $error = 'Nieprawidłowy e-mail lub hasło. Jeśli nie masz konta, <a href="rejestracja.php">zarejestruj się</a>.';
     }
 }
 ?>

@@ -1,9 +1,22 @@
 <?php
 require '../cfg.php';
+require 'csrf.php';
 
 if (!isset($_SESSION['zalogowany'])) {
     header('Location: logowanie.php');
     exit;
+}
+
+$perms = $_SESSION['perms'] ?? [];
+if (!isset($perms['hr'])) {
+    header('Location: index.php');
+    exit;
+}
+$canManage = ($perms['hr'] ?? '') === 'W';
+
+// Ochrona CSRF dla wszystkich żądań POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
 }
 
 // Głogowski
@@ -12,7 +25,7 @@ if (!isset($_SESSION['zalogowany'])) {
 
 $err = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
     $id = (int)($_POST['id'] ?? 0);
 
     $last = trim($_POST['last_name'] ?? '');
@@ -51,9 +64,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
         $err = 'Hasła nie są zgodne.';
     } elseif ($manager_id === $id && $id > 0) {
         $err = 'Pracownik nie może być swoim własnym przełożonym.';
+    } elseif (mb_strlen($username) > 12) {
+        $err = 'Login (username) może mieć maksymalnie 12 znaków.';
     }
 
     if ($err === '') {
+      try {
         if ($id > 0) {
             $sql = 'UPDATE emp SET
                 last_name = ?, first_name = ?, start_date = ?, end_date = ?, comments = ?,
@@ -102,21 +118,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
 
         header('Location: emp.php');
         exit;
+      } catch (PDOException $e) {
+        $code = $e->errorInfo[1] ?? 0;
+        if ($code === 1062) {
+            $err = 'Taki login (username), PESEL lub inna unikalna wartość już istnieje.';
+        } elseif ($code === 1452) {
+            $err = 'Wybrane stanowisko, dział lub przełożony nie istnieje.';
+        } elseif ($code === 1406) {
+            $err = 'Któreś z pól jest za długie.';
+        } else {
+            $err = 'Nie udało się zapisać pracownika.';
+        }
+      }
     }
 }
 
-if (($_GET['action'] ?? '') === 'delete' && isset($_GET['id'])) {
-    $did = (int)$_GET['id'];
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    $did = (int)($_POST['id'] ?? 0);
 
-    if ($did > 0) {
-        // Jeżeli inni pracownicy lub inne tabele wskazują na tego pracownika,
-        // baza może zablokować usunięcie przez klucz obcy.
-        $stmt = $pdo->prepare('DELETE FROM emp WHERE id = ?');
-        $stmt->execute([$did]);
+    if ($did > 0 && $did === (int)($_SESSION['user_id'] ?? 0)) {
+        $err = 'Nie możesz usunąć własnego konta.';
+    } elseif ($did > 0) {
+        try {
+            $stmt = $pdo->prepare('DELETE FROM emp WHERE id = ?');
+            $stmt->execute([$did]);
+            header('Location: emp.php');
+            exit;
+        } catch (PDOException $e) {
+            // inne tabele (ord, warehouse, customer, emp.manager_id) wskazują na pracownika
+            $err = 'Nie można usunąć pracownika – jest powiązany z innymi danymi.';
+        }
     }
-
-    header('Location: emp.php');
-    exit;
 }
 
 // Dane pracowników zgodne z rzeczywistą strukturą tabeli emp.
@@ -137,9 +169,11 @@ include 'szablony/naglowek.php';
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h2>Lista Pracowników (Tabela: EMP)</h2>
+    <?php if ($canManage): ?>
     <div>
         <a href="emp.php?action=add" class="btn btn-success btn-sm">Dodaj pracownika</a>
     </div>
+    <?php endif; ?>
 </div>
 <p class="lead">Zarządzanie pracownikami zgodnie ze strukturą tabeli EMP.</p>
 
@@ -147,7 +181,7 @@ include 'szablony/naglowek.php';
     <div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div>
 <?php endif; ?>
 
-<?php if (isset($_GET['action']) && in_array($_GET['action'], ['add', 'edit'], true)):
+<?php if ($canManage && isset($_GET['action']) && in_array($_GET['action'], ['add', 'edit'], true)):
     $act = $_GET['action'];
     $rec = [
         'id' => '', 'last_name' => '', 'first_name' => '', 'start_date' => '', 'end_date' => '2099-12-31',
@@ -172,6 +206,7 @@ include 'szablony/naglowek.php';
     $startValue = !empty($rec['start_date']) ? date('Y-m-d\\TH:i', strtotime($rec['start_date'])) : '';
 ?>
     <form method="post" class="mb-4">
+        <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="save">
         <input type="hidden" name="id" value="<?php echo htmlspecialchars($rec['id']); ?>">
 
@@ -370,8 +405,15 @@ include 'szablony/naglowek.php';
                 <td><?php echo htmlspecialchars($p['start_date'] ?? ''); ?></td>
                 <td><?php echo (!empty($p['end_date']) && $p['end_date'] < date('Y-m-d')) ? 'Nie' : 'Tak'; ?></td>
                 <td class="text-nowrap">
-                    <a href="emp.php?action=edit&id=<?php echo $p['id']; ?>" class="btn btn-sm btn-primary">Edytuj</a>
-                    <a href="emp.php?action=delete&id=<?php echo $p['id']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Usunąć tego pracownika?');">Usuń</a>
+                    <?php if ($canManage): ?>
+                        <a href="emp.php?action=edit&id=<?php echo (int)$p['id']; ?>" class="btn btn-sm btn-primary">Edytuj</a>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Usunąć tego pracownika?');">
+        <?php echo csrf_field(); ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?php echo (int)$p['id']; ?>">
+                            <button class="btn btn-sm btn-danger">Usuń</button>
+                        </form>
+                    <?php endif; ?>
                 </td>
             </tr>
         <?php endforeach; ?>

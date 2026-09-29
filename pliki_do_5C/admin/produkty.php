@@ -1,114 +1,113 @@
 <?php
-//Zrobił Mateusz Syska 
+// produkty.php | Tabela: product (id, name, short_desc, suggested_price) | dostęp: menu 'magazyn' lub 'warehouse'
 require '../cfg.php';
+require 'csrf.php';
 
-if(!isset($_SESSION['zalogowany'])){
+if (!isset($_SESSION['zalogowany'])) {
     header('Location: logowanie.php');
     exit;
 }
 
-$rola_id = $_SESSION['rola_id'] ?? 0;
-if (!in_array($rola_id, [1, 2, 3, 4])) {
+$perms = $_SESSION['perms'] ?? [];
+if (!isset($perms['magazyn']) && !isset($perms['warehouse'])) {
     header('Location: index.php');
     exit;
 }
+$canManage = ($perms['magazyn'] ?? '') === 'W' || ($perms['warehouse'] ?? '') === 'W';
 
-// CRUD support: roles 1 (admin), 2 (HR), 3 (kierownik) can manage; role 4 (magazynier) is read-only
-$stmt = $pdo->query("SELECT * FROM product ORDER BY id");
-$rows = $stmt->fetchAll();
+// Ochrona CSRF dla wszystkich żądań POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+}
 
-$canManage = in_array($rola_id, [1, 2, 3]);
+$err = '';
+$rec = ['id' => '', 'name' => '', 'short_desc' => '', 'suggested_price' => ''];
 
-// Handle POST save
-if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save') {
-    $id = isset($_POST['id']) && $_POST['id'] !== '' ? (int)$_POST['id'] : null;
-    $name = trim($_POST['nazwa'] ?? '');
-    $short_desc = trim($_POST['opis'] ?? '');
-    $suggested_price = $_POST['cena'] ?? '0';
-    $code = trim($_POST['sku'] ?? '');
-    $category = trim($_POST['kategoria'] ?? '');
-    $active = isset($_POST['aktywny']) ? 1 : 0;
+// Zapis (dodanie / edycja)
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
+    $id    = (int)($_POST['id'] ?? 0);
+    $name  = trim($_POST['name'] ?? '');
+    $desc  = trim($_POST['short_desc'] ?? '');
+    $price = str_replace(',', '.', trim($_POST['suggested_price'] ?? ''));
+    $rec = ['id' => $id ?: '', 'name' => $name, 'short_desc' => $desc, 'suggested_price' => $price];
 
-    if ($id) {
-        $stmt = $pdo->prepare('UPDATE product SET name=?, short_desc=?, suggested_price=?, code=?, category=?, active=? WHERE id=?');
-        $stmt->execute([$name, $short_desc, $suggested_price, $code, $category, $active, $id]);
-    } else {
-        $stmt = $pdo->prepare('INSERT INTO product (name, short_desc, suggested_price, code, category, active) VALUES (?,?,?,?,?,?)');
-        $stmt->execute([$name, $short_desc, $suggested_price, $code, $category, $active]);
+    if ($name === '') {
+        $err = 'Podaj nazwę produktu.';
+    } elseif (mb_strlen($name) > 50) {
+        $err = 'Nazwa może mieć maksymalnie 50 znaków.';
+    } elseif (mb_strlen($desc) > 255) {
+        $err = 'Opis może mieć maksymalnie 255 znaków.';
+    } elseif ($price !== '' && (!is_numeric($price) || (float)$price < 0)) {
+        $err = 'Cena musi być liczbą nieujemną.';
     }
-    header('Location: product.php');
-    exit;
+
+    if ($err === '') {
+        $priceV = $price === '' ? null : $price;
+        try {
+            if ($id > 0) {
+                $pdo->prepare('UPDATE product SET name=?, short_desc=?, suggested_price=? WHERE id=?')->execute([$name, $desc, $priceV, $id]);
+            } else {
+                $pdo->prepare('INSERT INTO product (name, short_desc, suggested_price) VALUES (?,?,?)')->execute([$name, $desc, $priceV]);
+            }
+            header('Location: produkty.php');
+            exit;
+        } catch (PDOException $e) {
+            $err = 'Nie udało się zapisać produktu.';
+        }
+    }
 }
 
-// Handle delete
-if ($canManage && isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
-    $delId = (int)$_GET['id'];
-    $stmt = $pdo->prepare('DELETE FROM product WHERE id = ?');
-    $stmt->execute([$delId]);
-    header('Location: product.php');
-    exit;
+// Usuwanie (POST)
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    try {
+        $pdo->prepare('DELETE FROM product WHERE id = ?')->execute([(int)($_POST['id'] ?? 0)]);
+        header('Location: produkty.php');
+        exit;
+    } catch (PDOException $e) {
+        // inventory, item i prices mają klucz obcy do product
+        $err = 'Nie można usunąć produktu – jest użyty w magazynie, zamówieniach lub cennikach.';
+    }
 }
+
+$act = $_GET['action'] ?? '';
+if ($canManage && $act === 'edit' && $_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['id'])) {
+    $s = $pdo->prepare('SELECT * FROM product WHERE id = ?');
+    $s->execute([(int)$_GET['id']]);
+    $row = $s->fetch(PDO::FETCH_ASSOC);
+    if ($row) $rec = $row;
+}
+
+$rows = $pdo->query('SELECT id, name, short_desc, suggested_price FROM product ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
 
 include 'szablony/naglowek.php';
 ?>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
-        <h2>Lista Produktów (Tabela: PRODUKTY)</h2>
+        <h2>Lista Produktów (Tabela: PRODUCT)</h2>
         <p class="lead">Lista produktów dostępnych w sklepie.</p>
     </div>
     <?php if ($canManage): ?>
-        <div>
-            <a class="btn btn-primary" href="product.php?action=add">Dodaj produkt</a>
-        </div>
+        <a class="btn btn-primary" href="produkty.php?action=add">Dodaj produkt</a>
     <?php endif; ?>
 </div>
 
-<?php
-$act = $_GET['action'] ?? '';
-$editData = null;
-if ($canManage && $act === 'edit' && isset($_GET['id'])) {
-    $eid = (int)$_GET['id'];
-    $s = $pdo->prepare('SELECT * FROM product WHERE id = ?');
-    $s->execute([$eid]);
-    $editData = $s->fetch();
-}
-if ($canManage && in_array($act, ['add','edit'])):
-    $idVal = $editData['id'] ?? '';
-    $nameVal = $editData['nazwa'] ?? '';
-    $short_descVal = $editData['opis'] ?? '';
-    $suggested_priceVal = $editData['cena'] ?? '';
-    $codeVal = $editData['sku'] ?? '';
-    $codeVal = $editData['kategoria'] ?? '';
-    $activeVal = isset($editData['aktywny']) && $editData['aktywny'] ? 'checked' : '';
-?>
+<?php if ($err !== ''): ?>
+    <div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div>
+<?php endif; ?>
+
+<?php if ($canManage && in_array($act, ['add', 'edit'], true)): ?>
     <form method="post" class="mb-4">
+        <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="save">
-        <input type="hidden" name="id" value="<?php echo htmlspecialchars($idVal); ?>">
+        <input type="hidden" name="id" value="<?php echo htmlspecialchars((string)$rec['id']); ?>">
         <div class="row g-2">
-            <div class="col-md-4">
-                <input class="form-control" name="name" placeholder="Name" value="<?php echo htmlspecialchars($nameVal); ?>">
-            </div>
-            <div class="col-md-4">
-                <input class="form-control" name="suggested_price" placeholder="suggested_price" value="<?php echo htmlspecialchars($suggested_priceVal); ?>">
-            </div>
-            <div class="col-md-4">
-                <input class="form-control" name="code" placeholder="code" value="<?php echo htmlspecialchars($codeVal); ?>">
-            </div>
-            <div class="col-md-6 mt-2">
-                <input class="form-control" name="code" placeholder="code" value="<?php echo htmlspecialchars($codeVal); ?>">
-            </div>
-            <div class="col-md-6 mt-2">
-                <input class="form-control" name="short_desc" placeholder="short_desc" value="<?php echo htmlspecialchars($short_descVal); ?>">
-            </div>
-            <div class="col-md-12 mt-2">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="active" id="active" <?php echo $activeVal; ?>>
-                    <label class="form-check-label" for="active">Aktywny</label>
-                </div>
-            </div>
+            <div class="col-md-4"><input class="form-control" name="name" maxlength="50" placeholder="Nazwa *" required value="<?php echo htmlspecialchars((string)$rec['name']); ?>"></div>
+            <div class="col-md-5"><input class="form-control" name="short_desc" maxlength="255" placeholder="Opis" value="<?php echo htmlspecialchars((string)$rec['short_desc']); ?>"></div>
+            <div class="col-md-3"><input class="form-control" name="suggested_price" placeholder="Sugerowana cena" value="<?php echo htmlspecialchars((string)$rec['suggested_price']); ?>"></div>
             <div class="col-md-12 mt-2">
                 <button class="btn btn-success">Zapisz</button>
-                <a class="btn btn-secondary" href="product.php">Anuluj</a>
+                <a class="btn btn-secondary" href="produkty.php">Anuluj</a>
             </div>
         </div>
     </form>
@@ -117,47 +116,29 @@ if ($canManage && in_array($act, ['add','edit'])):
 <?php if (count($rows) === 0): ?>
     <p>Brak rekordów.</p>
 <?php else: ?>
-    <?php
-    $labelMap = [
-        'id' => 'ID',
-        'name' => 'Name',
-        'short_description' => 'Short_description',
-        'suggested_price' => 'Suggested_price',
-        'short_desc' => 'Short_desc',
-        'Category' => 'Category',
-        'active' => 'Active',
-    ];
-    $firstKeys = array_keys($rows[0]);
-    ?>
     <table class="table table-hover table-sm">
         <thead class="table-dark">
             <tr>
-                <?php foreach ($firstKeys as $col): ?>
-                    <th><?php echo htmlspecialchars($labelMap[$col] ?? ucfirst($col)); ?></th>
-                <?php endforeach; ?>
+                <th>ID</th><th>Nazwa</th><th>Opis</th><th>Sugerowana cena</th>
                 <?php if ($canManage): ?><th>Akcje</th><?php endif; ?>
             </tr>
         </thead>
         <tbody>
             <?php foreach ($rows as $r): ?>
                 <tr>
-                    <?php foreach ($firstKeys as $k): ?>
-                        <td>
-                            <?php
-                            $v = $r[$k];
-                            // Format aktywny as tak/nie
-                            if ($k === 'active') {
-                                echo ($v == 1) ? 'tak' : 'nie';
-                            } else {
-                                echo htmlspecialchars((string)$v);
-                            }
-                            ?>
-                        </td>
-                    <?php endforeach; ?>
+                    <td><?php echo (int)$r['id']; ?></td>
+                    <td><?php echo htmlspecialchars($r['name']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$r['short_desc']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$r['suggested_price']); ?></td>
                     <?php if ($canManage): ?>
                         <td>
                             <a class="btn btn-sm btn-outline-primary" href="produkty.php?action=edit&id=<?php echo urlencode($r['id']); ?>">Edytuj</a>
-                            <a class="btn btn-sm btn-outline-danger" href="produkty.php?action=delete&id=<?php echo urlencode($r['id']); ?>" onclick="return confirm('Usuń produkt?');">Usuń</a>
+                            <form method="post" class="d-inline" onsubmit="return confirm('Usunąć produkt?');">
+        <?php echo csrf_field(); ?>
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>">
+                                <button class="btn btn-sm btn-outline-danger">Usuń</button>
+                            </form>
                         </td>
                     <?php endif; ?>
                 </tr>

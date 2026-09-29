@@ -1,15 +1,25 @@
 <?php
- 
+
 require '../cfg.php';
 
- 
-if(!isset($_SESSION['zalogowany'])){
+if (!isset($_SESSION['zalogowany'])) {
     header('Location: logowanie.php');
     exit;
 }
 
-$stmt = $pdo->query("SELECT * FROM ustawienia_projektu ORDER BY id");
-$rows = $stmt->fetchAll();
+// Tabela ustawienia_projektu NIE istnieje w baza_testowa.sql - najpierw ją utwórz
+// (patrz ustawienia_projektu.sql). Do tego czasu strona pokazuje komunikat zamiast błędu PDO.
+$rows = [];
+$missing = false;
+try {
+    $rows = $pdo->query("SELECT * FROM ustawienia_projektu ORDER BY id")->fetchAll();
+} catch (PDOException $e) {
+    if (($e->errorInfo[1] ?? 0) === 1146) { // 1146 = table doesn't exist
+        $missing = true;
+    } else {
+        throw $e;
+    }
+}
 
 include 'szablony/naglowek.php';
 ?>
@@ -17,7 +27,11 @@ include 'szablony/naglowek.php';
 <h2>Ustawienia (Tabela: USTAWIENIA_PROJEKTU)</h2>
 <p class="lead">Ustawienia projektu i metadane. Strona dostępna dla wszystkich zalogowanych.</p>
 
-<?php if (count($rows) === 0): ?>
+<?php if ($missing): ?>
+    <div class="alert alert-warning" role="alert">
+        Tabela <code>ustawienia_projektu</code> nie istnieje w bazie danych.
+    </div>
+<?php elseif (count($rows) === 0): ?>
     <p>Brak rekordów.</p>
 <?php else: ?>
     <table class="table table-hover table-sm">

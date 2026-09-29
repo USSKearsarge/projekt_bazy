@@ -47,7 +47,7 @@ include 'szablony/naglowek.php';
             <div class="card-header bg-success text-white">👥 Moduł Kadr (HR)</div>
             <div class="card-body">
                 <ul class="list-group list-group-flush">
-                    <li class="list-group-item"><a href="pracownicy.php">Lista Pracowników</a></li>
+                    <li class="list-group-item"><a href="emp.php">Lista Pracowników</a></li>
                     <li class="list-group-item"><a href="role.php">Role</a></li>
                     <li class="list-group-item"><a href="title.php">Stanowiska</a></li>
                     <li class="list-group-item"><a href="dept.php">Działy</a></li>

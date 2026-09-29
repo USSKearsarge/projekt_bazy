@@ -1,78 +1,109 @@
 <?php
-//Michał Pałyga 
+// inwentaz.php | Tabela: inventory (klucz główny: product_id + warehouse_id)
 require '../cfg.php';
+require 'csrf.php';
 
 if (!isset($_SESSION['zalogowany'])) {
-   header('Location: logowanie.php');
-   exit;
+    header('Location: logowanie.php');
+    exit;
 }
 
-$rola_id = $_SESSION['rola_id'] ?? 0;
-if (!in_array($rola_id, [1, 2, 3, 4])) {
+$perms = $_SESSION['perms'] ?? [];
+if (!isset($perms['magazyn']) && !isset($perms['warehouse'])) {
     header('Location: index.php');
     exit;
 }
-$rola_id = 1;
+$canManage = ($perms['magazyn'] ?? '') === 'W' || ($perms['warehouse'] ?? '') === 'W';
 
-$stmt = $pdo->query(
-    "SELECT inventory.product_id, inventory.warehouse_id, inventory.amount_in_stock AS ilosc, product.name AS 'nazwa produktu', CONCAT(warehouse.city, ' ', warehouse.address) AS 'nazwa magazynu'
-     FROM inventory
-     LEFT JOIN product    ON inventory.product_id   = product.id
-     LEFT JOIN warehouse  ON inventory.warehouse_id = warehouse.id
-     ORDER BY product.name, 'nazwa magazynu'"
-);
-$rows = $stmt->fetchAll();
+// Ochrona CSRF dla wszystkich żądań POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+}
 
-$canManage = in_array($rola_id, [1, 2, 3, 4]);
+$err = '';
+$products = $pdo->query('SELECT id, name FROM product ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+$warehouses = $pdo->query('SELECT id, city, address FROM warehouse ORDER BY city, address')->fetchAll(PDO::FETCH_ASSOC);
+$productIds = array_map('intval', array_column($products, 'id'));
+$warehouseIds = array_map('intval', array_column($warehouses, 'id'));
 
-// fetch products and warehouses for form dropdowns
-$products = $pdo->query('SELECT id, name FROM product ORDER BY name')->fetchAll();
-$warehouses = $pdo->query('SELECT id, city, address FROM warehouse ORDER BY city')->fetchAll();
+$origP = null;
+$origW = null;
+$rec = ['product_id' => '', 'warehouse_id' => '', 'amount_in_stock' => '', 'reorder_point' => '', 'max_in_stock' => ''];
 
-// Handle save (create or update)
-if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save') {
-    $product_id = (int)($_POST['product_id'] ?? 0);
+// Zapis (dodanie / edycja)
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
+    $product_id   = (int)($_POST['product_id'] ?? 0);
     $warehouse_id = (int)($_POST['warehouse_id'] ?? 0);
-    $ilosc = (int)($_POST['amount_in_stock'] ?? 0);
-    $code = trim($_POST['code'] ?? '');
+    $amount  = trim($_POST['amount_in_stock'] ?? '');
+    $reorder = trim($_POST['reorder_point'] ?? '');
+    $max     = trim($_POST['max_in_stock'] ?? '');
+    $origP = ($_POST['orig_product_id'] ?? '') !== '' ? (int)$_POST['orig_product_id'] : null;
+    $origW = ($_POST['orig_warehouse_id'] ?? '') !== '' ? (int)$_POST['orig_warehouse_id'] : null;
 
-    // determine if this is an edit (original keys provided)
-    $orig_prod = isset($_POST['orig_product_id']) ? (int)$_POST['orig_product_id'] : null;
-    $orig_mag = isset($_POST['orig_warehouse_id']) ? (int)$_POST['orig_warehouse_id'] : null;
+    $rec = ['product_id' => $product_id, 'warehouse_id' => $warehouse_id, 'amount_in_stock' => $amount,
+            'reorder_point' => $reorder, 'max_in_stock' => $max];
 
-    if ($orig_prod !== null && $orig_mag !== null) {
-        // update existing row (possibly changing keys)
-        $stmt = $pdo->prepare('UPDATE inventory SET product_id=?, warehouse_id=?, code=?, amount_in_stock=? WHERE product_id=? AND warehouse_id=?');
-        $stmt->execute([$product_id, $warehouse_id, $code, $ilosc, $orig_prod, $orig_mag]);
-    } else {
-        // insert (ignore duplicates)
-        $stmt = $pdo->prepare('REPLACE INTO inventory (product_id, warehouse_id, code, amount_in_stock) VALUES (?,?,?,?)');
-        $stmt->execute([$product_id, $warehouse_id, $code, $ilosc]);
+    if (!in_array($product_id, $productIds, true)) {
+        $err = 'Wybierz produkt.';
+    } elseif (!in_array($warehouse_id, $warehouseIds, true)) {
+        $err = 'Wybierz magazyn.';
+    } elseif (!ctype_digit($amount)) {
+        $err = 'Ilość musi być liczbą całkowitą nieujemną.';
+    } elseif (($reorder !== '' && !ctype_digit($reorder)) || ($max !== '' && !ctype_digit($max))) {
+        $err = 'Punkt zamówienia i maksimum muszą być liczbami całkowitymi nieujemnymi.';
     }
 
+    if ($err === '') {
+        $reorderV = $reorder === '' ? null : (int)$reorder;
+        $maxV     = $max === '' ? null : (int)$max;
+        try {
+            if ($origP !== null && $origW !== null) {
+                $s = $pdo->prepare('UPDATE inventory SET product_id=?, warehouse_id=?, amount_in_stock=?, reorder_point=?, max_in_stock=? WHERE product_id=? AND warehouse_id=?');
+                $s->execute([$product_id, $warehouse_id, (int)$amount, $reorderV, $maxV, $origP, $origW]);
+            } else {
+                $s = $pdo->prepare('INSERT INTO inventory (product_id, warehouse_id, amount_in_stock, reorder_point, max_in_stock) VALUES (?,?,?,?,?)');
+                $s->execute([$product_id, $warehouse_id, (int)$amount, $reorderV, $maxV]);
+            }
+            header('Location: inwentaz.php');
+            exit;
+        } catch (PDOException $e) {
+            $err = ($e->getCode() === '23000')
+                ? 'Ten produkt ma już wpis w tym magazynie.'
+                : 'Nie udało się zapisać wpisu.';
+        }
+    }
+}
+
+// Usuwanie (POST)
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    $s = $pdo->prepare('DELETE FROM inventory WHERE product_id = ? AND warehouse_id = ?');
+    $s->execute([(int)($_POST['product_id'] ?? 0), (int)($_POST['warehouse_id'] ?? 0)]);
     header('Location: inwentaz.php');
     exit;
 }
 
-// Handle delete
-if ($canManage && isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['product_id']) && isset($_GET['warehouse_id'])) {
-    $prod_id = (int)$_GET['product_id'];
-    $ware_id = (int)$_GET['warehouse_id'];
-    $stmt = $pdo->prepare('DELETE FROM inventory WHERE product_id=? AND warehouse_id=?');
-    $stmt->execute([$prod_id, $ware_id]);
-    header('Location: inwentaz.php');
-    exit;
+// Ładowanie rekordu do edycji
+$act = $_GET['action'] ?? '';
+if ($canManage && $act === 'edit' && $_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['product_id'], $_GET['warehouse_id'])) {
+    $s = $pdo->prepare('SELECT * FROM inventory WHERE product_id = ? AND warehouse_id = ?');
+    $s->execute([(int)$_GET['product_id'], (int)$_GET['warehouse_id']]);
+    $row = $s->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        $rec = $row;
+        $origP = (int)$row['product_id'];
+        $origW = (int)$row['warehouse_id'];
+    }
 }
 
-// If editing, load the row
-$edit = null;
-if ($canManage && isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['product_id']) && isset($_GET['warehouse_id'])) {
-    $prod_id = (int)$_GET['product_id'];
-    $ware_id = (int)$_GET['warehouse_id'];
-    $stmt = $pdo->prepare('SELECT * FROM inventory WHERE product_id=? AND warehouse_id=?');
-    $stmt->execute([$prod_id, $ware_id]);
-    $edit = $stmt->fetch();
-}
+$rows = $pdo->query(
+    "SELECT i.product_id, i.warehouse_id, p.name AS product_name,
+            CONCAT(w.city, ' ', w.address) AS warehouse_name,
+            i.amount_in_stock, i.reorder_point, i.max_in_stock
+     FROM inventory i
+     LEFT JOIN product p ON i.product_id = p.id
+     LEFT JOIN warehouse w ON i.warehouse_id = w.id
+     ORDER BY p.name, w.city, w.address"
+)->fetchAll(PDO::FETCH_ASSOC);
 
 include 'szablony/naglowek.php';
 ?>
@@ -80,44 +111,47 @@ include 'szablony/naglowek.php';
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h2>Stan Magazynowy (Tabela: INVENTORY)</h2>
     <?php if ($canManage): ?>
-        <div>
-            <a class="btn btn-sm btn-success" href="inwentaz.php?action=add">Dodaj wpis</a>
-        </div>
+        <a class="btn btn-sm btn-success" href="inwentaz.php?action=add">Dodaj wpis</a>
     <?php endif; ?>
 </div>
-<p class="lead">Aktualny stan zapasów.</p>
+<p class="lead">Aktualny stan zapasów. Wiersze na żółto: stan poniżej lub równy punktowi zamówienia.</p>
 
-<?php
-$act = $_GET['action'] ?? '';
-if ($canManage && in_array($act, ['add', 'edit'])):
-    $prodVal = $edit['product_id'] ?? '';
-    $magVal = $edit['warehouse_id'] ?? '';
-    $codeVal = $edit['code'] ?? '';
-    $iloscVal = $edit['amount_in_stock'] ?? '';
-?>
+<?php if ($err !== ''): ?>
+    <div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div>
+<?php endif; ?>
+
+<?php if ($canManage && in_array($act, ['add', 'edit'], true)): ?>
     <form method="post" class="mb-4">
+        <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="save">
-        <?php if ($act === 'edit' && $edit): ?>
-            <input type="hidden" name="orig_product_id" value="<?php echo htmlspecialchars($edit['product_id']); ?>">
-            <input type="hidden" name="orig_warehouse_id" value="<?php echo htmlspecialchars($edit['warehouse_id']); ?>">
+        <?php if ($origP !== null && $origW !== null): ?>
+            <input type="hidden" name="orig_product_id" value="<?php echo (int)$origP; ?>">
+            <input type="hidden" name="orig_warehouse_id" value="<?php echo (int)$origW; ?>">
         <?php endif; ?>
         <div class="row g-2">
-            <div class="col-md-4">
-                <select name="produkt_id" class="form-select">
+            <div class="col-md-3">
+                <select name="product_id" class="form-select" required>
+                    <option value="">-- Produkt --</option>
                     <?php foreach ($products as $prod): ?>
-                        <option value="<?php echo $prod['id']; ?>" <?php echo ($prod['id'] == $prodVal) ? 'selected' : ''; ?>><?php echo htmlspecialchars($prod['name']); ?></option>
+                        <option value="<?php echo (int)$prod['id']; ?>" <?php echo ((int)$prod['id'] === (int)$rec['product_id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($prod['name']); ?>
+                        </option>
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-md-4">
-                <select name="magazyn_id" class="form-select">
+            <div class="col-md-3">
+                <select name="warehouse_id" class="form-select" required>
+                    <option value="">-- Magazyn --</option>
                     <?php foreach ($warehouses as $ware): ?>
-                        <option value="<?php echo $ware['id']; ?>" <?php echo ($ware['id'] == $magVal) ? 'selected' : ''; ?>><?php echo htmlspecialchars($ware['address']); ?></option>
+                        <option value="<?php echo (int)$ware['id']; ?>" <?php echo ((int)$ware['id'] === (int)$rec['warehouse_id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($ware['city'] . ' ' . $ware['address']); ?>
+                        </option>
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-md-2"><input class="form-control" name="ilosc" placeholder="Ilość" value="<?php echo htmlspecialchars($iloscVal); ?>"></div>
-            <div class="col-md-2"><input class="form-control" name="code" placeholder="code" value="<?php echo htmlspecialchars($codeVal); ?>"></div>
+            <div class="col-md-2"><input class="form-control" name="amount_in_stock" placeholder="Ilość" required value="<?php echo htmlspecialchars($rec['amount_in_stock']); ?>"></div>
+            <div class="col-md-2"><input class="form-control" name="reorder_point" placeholder="Punkt zamówienia" value="<?php echo htmlspecialchars((string)$rec['reorder_point']); ?>"></div>
+            <div class="col-md-2"><input class="form-control" name="max_in_stock" placeholder="Maksimum" value="<?php echo htmlspecialchars((string)$rec['max_in_stock']); ?>"></div>
         </div>
         <div class="mt-2">
             <button class="btn btn-primary btn-sm">Zapisz</button>
@@ -129,34 +163,41 @@ if ($canManage && in_array($act, ['add', 'edit'])):
 <?php if (count($rows) === 0): ?>
     <p>Brak rekordów.</p>
 <?php else: ?>
-    <?php
-    $labelMap = [
-        'product_id' => 'Produkt ID',
-        'warehouse_id' => 'Magazyn ID',
-        'amount_in_stock' => 'Ilość',
-        'product_name' => 'Produkt',
-        'warehouse_address' => 'Magazyn',
-    ];
-    ?>
     <table class="table table-hover table-sm">
         <thead class="table-dark">
             <tr>
-                <?php foreach (array_keys($rows[0]) as $col): ?>
-                    <th><?php echo htmlspecialchars($labelMap[$col] ?? ucfirst($col)); ?></th>
-                <?php endforeach; ?>
+                <th>Produkt ID</th>
+                <th>Magazyn ID</th>
+                <th>Produkt</th>
+                <th>Magazyn</th>
+                <th>Ilość</th>
+                <th>Punkt zamówienia</th>
+                <th>Maksimum</th>
                 <?php if ($canManage): ?><th>Akcje</th><?php endif; ?>
             </tr>
         </thead>
         <tbody>
-            <?php foreach ($rows as $row): ?>
-                <tr>
-                    <?php foreach ($row as $k => $v): ?>
-                        <td><?php echo htmlspecialchars((string)$v); ?></td>
-                    <?php endforeach; ?>
+            <?php foreach ($rows as $row):
+                $low = $row['reorder_point'] !== null && (int)$row['amount_in_stock'] <= (int)$row['reorder_point'];
+            ?>
+                <tr<?php echo $low ? ' class="table-warning"' : ''; ?>>
+                    <td><?php echo (int)$row['product_id']; ?></td>
+                    <td><?php echo (int)$row['warehouse_id']; ?></td>
+                    <td><?php echo htmlspecialchars((string)$row['product_name']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$row['warehouse_name']); ?></td>
+                    <td><?php echo htmlspecialchars($row['amount_in_stock']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$row['reorder_point']); ?></td>
+                    <td><?php echo htmlspecialchars((string)$row['max_in_stock']); ?></td>
                     <?php if ($canManage): ?>
                         <td>
                             <a class="btn btn-sm btn-outline-primary" href="inwentaz.php?action=edit&product_id=<?php echo urlencode($row['product_id']); ?>&warehouse_id=<?php echo urlencode($row['warehouse_id']); ?>">Edytuj</a>
-                            <a class="btn btn-sm btn-outline-danger" href="inwentaz.php?action=delete&product_id=<?php echo urlencode($row['product_id']); ?>&warehouse_id=<?php echo urlencode($row['warehouse_id']); ?>" onclick="return confirm('Na pewno usunąć wpis?');">Usuń</a>
+                            <form method="post" class="d-inline" onsubmit="return confirm('Na pewno usunąć wpis?');">
+        <?php echo csrf_field(); ?>
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="product_id" value="<?php echo (int)$row['product_id']; ?>">
+                                <input type="hidden" name="warehouse_id" value="<?php echo (int)$row['warehouse_id']; ?>">
+                                <button class="btn btn-sm btn-outline-danger">Usuń</button>
+                            </form>
                         </td>
                     <?php endif; ?>
                 </tr>

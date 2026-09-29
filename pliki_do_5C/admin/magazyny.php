@@ -1,75 +1,108 @@
 <?php
- 
+// magazyny.php | Tabela: warehouse | dostęp: menu 'magazyn' lub 'warehouse'
 require '../cfg.php';
+require 'csrf.php';
 
-if(!isset($_SESSION['zalogowany'])){
+if (!isset($_SESSION['zalogowany'])) {
     header('Location: logowanie.php');
     exit;
 }
 
-$rola_id = $_SESSION['rola_id'] ?? 0;
-if (!in_array($rola_id, [1, 2, 3, 4])) {
+$perms = $_SESSION['perms'] ?? [];
+if (!isset($perms['magazyn']) && !isset($perms['warehouse'])) {
     header('Location: index.php');
     exit;
 }
+$canManage = ($perms['magazyn'] ?? '') === 'W' || ($perms['warehouse'] ?? '') === 'W';
 
-// CRUD for magazyny: roles 1 (admin), 2 (HR), 3 (kierownik) can manage; role 4 (magazynier) is read-only
-$canManage = in_array($rola_id, [1, 2, 3]);
+// Ochrona CSRF dla wszystkich żądań POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+}
 
-// Handle save
-if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save') {
-    $id = isset($_POST['id']) && $_POST['id'] !== '' ? (int)$_POST['id'] : null;
-    
-    // Nowe kolumny z bazy_testowa.sql
-    $address = trim($_POST['address'] ?? '');
-    $city = trim($_POST['city'] ?? '');
-    $state = trim($_POST['state'] ?? '');
-    $country = trim($_POST['country'] ?? '');
-    $zip_code = trim($_POST['zip_code'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-    $region_id = $_POST['region_id'] !== '' ? (int)$_POST['region_id'] : null;
-    $manager_id = $_POST['manager_id'] !== '' ? (int)$_POST['manager_id'] : null;
+$err = '';
+$regions  = $pdo->query('SELECT id, name FROM region ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+$managers = $pdo->query("SELECT id, CONCAT(first_name, ' ', last_name) AS name FROM emp ORDER BY last_name, first_name")->fetchAll(PDO::FETCH_ASSOC);
+$regionIds  = array_map('intval', array_column($regions, 'id'));
+$managerIds = array_map('intval', array_column($managers, 'id'));
 
-    if ($id) {
-        $stmt = $pdo->prepare('UPDATE warehouse SET address=?, city=?, state=?, country=?, zip_code=?, phone=?, region_id=?, manager_id=? WHERE id=?');
-        $stmt->execute([$address, $city, $state, $country, $zip_code, $phone, $region_id, $manager_id, $id]);
-    } else {
-        $stmt = $pdo->prepare('INSERT INTO warehouse (address, city, state, country, zip_code, phone, region_id, manager_id) VALUES (?,?,?,?,?,?,?,?)');
-        $stmt->execute([$address, $city, $state, $country, $zip_code, $phone, $region_id, $manager_id]);
+$rec = ['id' => '', 'address' => '', 'city' => '', 'state' => '', 'country' => '', 'zip_code' => '', 'phone' => '', 'region_id' => '', 'manager_id' => ''];
+
+// Zapis (dodanie / edycja)
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
+    $id = (int)($_POST['id'] ?? 0);
+    $rec = [
+        'id'         => $id ?: '',
+        'address'    => trim($_POST['address'] ?? ''),
+        'city'       => trim($_POST['city'] ?? ''),
+        'state'      => trim($_POST['state'] ?? ''),
+        'country'    => trim($_POST['country'] ?? ''),
+        'zip_code'   => trim($_POST['zip_code'] ?? ''),
+        'phone'      => trim($_POST['phone'] ?? ''),
+        'region_id'  => (int)($_POST['region_id'] ?? 0),
+        'manager_id' => (int)($_POST['manager_id'] ?? 0),
+    ];
+
+    // city, country, region_id i manager_id są NOT NULL w tabeli warehouse
+    if ($rec['city'] === '' || $rec['country'] === '') {
+        $err = 'Miasto i kraj są wymagane.';
+    } elseif (!in_array($rec['region_id'], $regionIds, true)) {
+        $err = 'Wybierz region.';
+    } elseif (!in_array($rec['manager_id'], $managerIds, true)) {
+        $err = 'Wybierz kierownika.';
+    } elseif (mb_strlen($rec['city']) > 30 || mb_strlen($rec['country']) > 30 || mb_strlen($rec['state']) > 20
+           || mb_strlen($rec['zip_code']) > 75 || mb_strlen($rec['phone']) > 25) {
+        $err = 'Któreś z pól jest za długie (miasto/kraj 30, stan 20, telefon 25 znaków).';
     }
-    header('Location: magazyny.php'); exit;
+
+    if ($err === '') {
+        $params = [
+            $rec['address'] ?: null, $rec['city'], $rec['state'] ?: null, $rec['country'],
+            $rec['zip_code'] ?: null, $rec['phone'] ?: null, $rec['region_id'], $rec['manager_id'],
+        ];
+        try {
+            if ($id > 0) {
+                $params[] = $id;
+                $pdo->prepare('UPDATE warehouse SET address=?, city=?, state=?, country=?, zip_code=?, phone=?, region_id=?, manager_id=? WHERE id=?')->execute($params);
+            } else {
+                $pdo->prepare('INSERT INTO warehouse (address, city, state, country, zip_code, phone, region_id, manager_id) VALUES (?,?,?,?,?,?,?,?)')->execute($params);
+            }
+            header('Location: magazyny.php');
+            exit;
+        } catch (PDOException $e) {
+            $err = 'Nie udało się zapisać magazynu.';
+        }
+    }
 }
 
-// Handle delete
-if ($canManage && isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
-    $did = (int)$_GET['id'];
-    $d = $pdo->prepare('DELETE FROM warehouse WHERE id = ?');
-    $d->execute([$did]);
-    header('Location: magazyny.php'); exit;
+// Usuwanie (POST)
+if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
+    try {
+        $pdo->prepare('DELETE FROM warehouse WHERE id = ?')->execute([(int)($_POST['id'] ?? 0)]);
+        header('Location: magazyny.php');
+        exit;
+    } catch (PDOException $e) {
+        // inventory.warehouse_id ma klucz obcy do warehouse
+        $err = 'Nie można usunąć magazynu – ma wpisy w stanie magazynowym.';
+    }
 }
 
-// Pobieranie pełnych danych magazynu z nazwami regionów i nazwiskami
-$sql = "SELECT 
-            w.id AS 'ID', 
-            r.name AS 'Region', 
-            w.address AS 'Adres', 
-            w.city AS 'Miasto', 
-            w.state AS 'Stan/Województwo', 
-            w.country AS 'Kraj', 
-            w.zip_code AS 'Kod pocztowy', 
-            w.phone AS 'Telefon', 
-            CONCAT(e.first_name, ' ', e.last_name) AS 'Kierownik'
-        FROM warehouse w
-        LEFT JOIN region r ON w.region_id = r.id
-        LEFT JOIN emp e ON w.manager_id = e.id
-        ORDER BY w.id";
-$stmt = $pdo->query($sql);
-// Zabezpieczenie przed zdublowaniem kolumn
-$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$act = $_GET['action'] ?? '';
+if ($canManage && $act === 'edit' && $_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['id'])) {
+    $s = $pdo->prepare('SELECT * FROM warehouse WHERE id = ?');
+    $s->execute([(int)$_GET['id']]);
+    $row = $s->fetch(PDO::FETCH_ASSOC);
+    if ($row) $rec = $row;
+}
 
-// Słowniki do rozwijanych list
-$regions = $pdo->query('SELECT id, name FROM region ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
-$managers = $pdo->query('SELECT id, CONCAT(first_name, " ", last_name) AS name FROM emp ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+$rows = $pdo->query(
+    "SELECT w.id, r.name AS region, w.address, w.city, w.state, w.country, w.zip_code, w.phone,
+            CONCAT(e.first_name, ' ', e.last_name) AS manager
+     FROM warehouse w
+     LEFT JOIN region r ON w.region_id = r.id
+     LEFT JOIN emp e ON w.manager_id = e.id
+     ORDER BY w.id"
+)->fetchAll(PDO::FETCH_ASSOC);
 
 include 'szablony/naglowek.php';
 ?>
@@ -80,56 +113,40 @@ include 'szablony/naglowek.php';
 </div>
 <p class="lead">Lista magazynów i powiązanych lokalizacji.</p>
 
-<?php
-$act = $_GET['action'] ?? '';
-$edit = null;
-if ($canManage && $act === 'edit' && isset($_GET['id'])) {
-    $eid = (int)$_GET['id']; 
-    $s = $pdo->prepare('SELECT * FROM warehouse WHERE id = ?'); 
-    $s->execute([$eid]); 
-    $edit = $s->fetch(PDO::FETCH_ASSOC);
-}
-if ($canManage && in_array($act, ['add','edit'])):
-    $idVal = $edit['id'] ?? '';
-    $addressVal = $edit['address'] ?? '';
-    $cityVal = $edit['city'] ?? '';
-    $stateVal = $edit['state'] ?? '';
-    $countryVal = $edit['country'] ?? '';
-    $zipVal = $edit['zip_code'] ?? '';
-    $phoneVal = $edit['phone'] ?? '';
-    $regionVal = $edit['region_id'] ?? '';
-    $mgrVal = $edit['manager_id'] ?? '';
-?>
+<?php if ($err !== ''): ?>
+    <div class="alert alert-danger"><?php echo htmlspecialchars($err); ?></div>
+<?php endif; ?>
+
+<?php if ($canManage && in_array($act, ['add', 'edit'], true)): ?>
     <form method="post" class="mb-4">
+        <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="save">
-        <input type="hidden" name="id" value="<?php echo htmlspecialchars($idVal); ?>">
+        <input type="hidden" name="id" value="<?php echo htmlspecialchars((string)$rec['id']); ?>">
         <div class="row g-2">
-            <div class="col-md-3"><input class="form-control" name="address" placeholder="Adres" value="<?php echo htmlspecialchars($addressVal); ?>"></div>
-            <div class="col-md-3"><input class="form-control" name="city" placeholder="Miasto" value="<?php echo htmlspecialchars($cityVal); ?>"></div>
-            <div class="col-md-3"><input class="form-control" name="state" placeholder="Stan/Województwo" value="<?php echo htmlspecialchars($stateVal); ?>"></div>
-            <div class="col-md-3"><input class="form-control" name="country" placeholder="Kraj" value="<?php echo htmlspecialchars($countryVal); ?>"></div>
-            
-            <div class="col-md-3 mt-2"><input class="form-control" name="zip_code" placeholder="Kod pocztowy" value="<?php echo htmlspecialchars($zipVal); ?>"></div>
-            <div class="col-md-3 mt-2"><input class="form-control" name="phone" placeholder="Telefon" value="<?php echo htmlspecialchars($phoneVal); ?>"></div>
-            
+            <div class="col-md-3"><input class="form-control" name="address" placeholder="Adres" value="<?php echo htmlspecialchars((string)$rec['address']); ?>"></div>
+            <div class="col-md-3"><input class="form-control" name="city" maxlength="30" placeholder="Miasto *" required value="<?php echo htmlspecialchars((string)$rec['city']); ?>"></div>
+            <div class="col-md-3"><input class="form-control" name="state" maxlength="20" placeholder="Stan/Województwo" value="<?php echo htmlspecialchars((string)$rec['state']); ?>"></div>
+            <div class="col-md-3"><input class="form-control" name="country" maxlength="30" placeholder="Kraj *" required value="<?php echo htmlspecialchars((string)$rec['country']); ?>"></div>
+            <div class="col-md-3 mt-2"><input class="form-control" name="zip_code" maxlength="75" placeholder="Kod pocztowy" value="<?php echo htmlspecialchars((string)$rec['zip_code']); ?>"></div>
+            <div class="col-md-3 mt-2"><input class="form-control" name="phone" maxlength="25" placeholder="Telefon" value="<?php echo htmlspecialchars((string)$rec['phone']); ?>"></div>
             <div class="col-md-3 mt-2">
-                <select name="region_id" class="form-control">
+                <select name="region_id" class="form-control" required>
                     <option value="">-- Wybierz region --</option>
-                    <?php foreach($regions as $rg): ?>
-                        <option value="<?php echo $rg['id']; ?>" <?php if($rg['id']==$regionVal) echo 'selected'; ?>><?php echo htmlspecialchars($rg['name']); ?></option>
+                    <?php foreach ($regions as $rg): ?>
+                        <option value="<?php echo (int)$rg['id']; ?>" <?php echo ((int)$rg['id'] === (int)$rec['region_id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($rg['name']); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
             <div class="col-md-3 mt-2">
-                <select name="manager_id" class="form-control">
+                <select name="manager_id" class="form-control" required>
                     <option value="">-- Wybierz kierownika --</option>
-                    <?php foreach($managers as $m): ?>
-                        <option value="<?php echo $m['id']; ?>" <?php if($m['id']==$mgrVal) echo 'selected'; ?>><?php echo htmlspecialchars($m['name']); ?></option>
+                    <?php foreach ($managers as $m): ?>
+                        <option value="<?php echo (int)$m['id']; ?>" <?php echo ((int)$m['id'] === (int)$rec['manager_id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($m['name'] . ' (#' . $m['id'] . ')'); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
             <div class="col-md-12 mt-3">
-                <button class="btn btn-success">Zapisz</button> 
+                <button class="btn btn-success">Zapisz</button>
                 <a class="btn btn-secondary" href="magazyny.php">Anuluj</a>
             </div>
         </div>
@@ -140,18 +157,33 @@ if ($canManage && in_array($act, ['add','edit'])):
     <p>Brak rekordów.</p>
 <?php else: ?>
     <table class="table table-hover table-sm">
-        <thead class="table-dark"><tr>
-            <?php foreach (array_keys($rows[0]) as $col): ?><th><?php echo htmlspecialchars($col); ?></th><?php endforeach; ?>
-            <?php if ($canManage): ?><th>Akcje</th><?php endif; ?>
-        </tr></thead>
+        <thead class="table-dark">
+            <tr>
+                <th>ID</th><th>Region</th><th>Adres</th><th>Miasto</th><th>Stan/Województwo</th>
+                <th>Kraj</th><th>Kod pocztowy</th><th>Telefon</th><th>Kierownik</th>
+                <?php if ($canManage): ?><th>Akcje</th><?php endif; ?>
+            </tr>
+        </thead>
         <tbody>
-            <?php foreach ($rows as $r): ?><tr>
-                <?php foreach ($r as $v): ?><td><?php echo htmlspecialchars((string)$v); ?></td><?php endforeach; ?>
-                <?php if ($canManage): ?><td>
-                    <a class="btn btn-sm btn-outline-primary" href="magazyny.php?action=edit&id=<?php echo urlencode($r['ID']); ?>">Edytuj</a>
-                    <a class="btn btn-sm btn-outline-danger" href="magazyny.php?action=delete&id=<?php echo urlencode($r['ID']); ?>" onclick="return confirm('Usuń magazyn?');">Usuń</a>
-                </td><?php endif; ?>
-            </tr><?php endforeach; ?>
+            <?php foreach ($rows as $r): ?>
+                <tr>
+                    <td><?php echo (int)$r['id']; ?></td>
+                    <?php foreach (['region', 'address', 'city', 'state', 'country', 'zip_code', 'phone', 'manager'] as $k): ?>
+                        <td><?php echo htmlspecialchars((string)$r[$k]); ?></td>
+                    <?php endforeach; ?>
+                    <?php if ($canManage): ?>
+                        <td>
+                            <a class="btn btn-sm btn-outline-primary" href="magazyny.php?action=edit&id=<?php echo urlencode($r['id']); ?>">Edytuj</a>
+                            <form method="post" class="d-inline" onsubmit="return confirm('Usunąć magazyn?');">
+        <?php echo csrf_field(); ?>
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>">
+                                <button class="btn btn-sm btn-outline-danger">Usuń</button>
+                            </form>
+                        </td>
+                    <?php endif; ?>
+                </tr>
+            <?php endforeach; ?>
         </tbody>
     </table>
 <?php endif; ?>

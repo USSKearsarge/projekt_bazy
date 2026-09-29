@@ -2,22 +2,10 @@
  //zrobił Mateusz Syska
 require '../cfg.php';
 
-if(!isset($_SESSION['zalogowany'])){
-    header('Location: logowanie.php');
-    exit;
-}
+require 'auth.php';
+require_access(['hr', 'magazyn']);
 
-// $rola_id = $_SESSION['rola_id'] ?? 0;
-// if (!in_array($rola_id, [1, 2, 3, 4])) {
-//     header('Location: index.php');
-//     exit;
-// }
-
-
-$canManage = in_array($rola_id, [1, 4]);
-
-$stmt = $pdo->query("SELECT * FROM ord ORDER BY id");
-$rows = $stmt->fetchAll();
+$rows = $pdo->query("SELECT * FROM ord ORDER BY id")->fetchAll();
 
 include 'szablony/naglowek.php';
 ?>
