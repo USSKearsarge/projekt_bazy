@@ -31,7 +31,14 @@ if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 
     $last = trim($_POST['last_name'] ?? '');
     $first = trim($_POST['first_name'] ?? '');
     $start_date = $_POST['start_date'] ?? null;
-    $end_date = $_POST['active'] ?? '' ? '2099-12-31' : date('Y-m-d');
+    $orig_end = $_POST['orig_end_date'] ?? '';
+    if ($_POST['active'] ?? '') {
+        $end_date = '2099-12-31';
+    } elseif (preg_match('/^\d{4}-\d{2}-\d{2}$/', $orig_end) && $orig_end < date('Y-m-d')) {
+        $end_date = $orig_end; // był już nieaktywny, zachowaj datę
+    } else {
+        $end_date = date('Y-m-d');
+    }
     $comments = trim($_POST['comments'] ?? '');
     $manager_id = ($_POST['manager_id'] ?? '') !== '' ? (int)$_POST['manager_id'] : null;
     $title = trim($_POST['title'] ?? '');
@@ -62,6 +69,8 @@ if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 
         $err = 'Nieprawidłowa płeć.';
     } elseif ($password !== '' && $password !== $password_confirm) {
         $err = 'Hasła nie są zgodne.';
+    } elseif ($password !== '' && mb_strlen($password) < 8) {
+        $err = 'Hasło musi mieć co najmniej 8 znaków.';
     } elseif ($manager_id === $id && $id > 0) {
         $err = 'Pracownik nie może być swoim własnym przełożonym.';
     } elseif (mb_strlen($username) > 12) {
@@ -198,7 +207,7 @@ include 'szablony/naglowek.php';
         $s->execute([$eid]);
         $r = $s->fetch(PDO::FETCH_ASSOC);
         if ($r) {
-            $rec = array_merge($rec, $r);
+                        $rec = array_merge($rec, array_map(fn($v) => $v ?? '', $r));
         }
     }
 
@@ -209,6 +218,7 @@ include 'szablony/naglowek.php';
         <?php echo csrf_field(); ?>
         <input type="hidden" name="action" value="save">
         <input type="hidden" name="id" value="<?php echo htmlspecialchars($rec['id']); ?>">
+        <input type="hidden" name="orig_end_date" value="<?php echo htmlspecialchars((string)$rec['end_date']); ?>">
 
         <div class="row">
             <div class="col-md-6 mb-3">
@@ -397,7 +407,7 @@ include 'szablony/naglowek.php';
             <tr>
                 <td><?php echo htmlspecialchars($p['id']); ?></td>
                 <td><?php echo htmlspecialchars($p['first_name'] . ' ' . $p['last_name']); ?></td>
-                <td><?php echo htmlspecialchars($p['title']); ?></td>
+                <td><?php echo htmlspecialchars((string)$p['title']); ?></td>
                 <td><?php echo htmlspecialchars($p['dept_name'] ?? ''); ?></td>
                 <td><?php echo htmlspecialchars($p['email'] ?? ''); ?></td>
                 <td><?php echo htmlspecialchars($p['city']); ?></td>

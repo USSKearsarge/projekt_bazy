@@ -33,6 +33,7 @@ if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 
         'phone'   => trim($_POST['phone'] ?? ''),
         'city'    => trim($_POST['city'] ?? ''),
         'country' => trim($_POST['country'] ?? ''),
+        'gender'  => $_POST['gender'] ?? '',
     ];
     // limity długości z tabeli customer
     $max = ['name' => 50, 'nip' => 10, 'email' => 30, 'phone' => 25, 'city' => 30, 'country' => 30];
@@ -41,6 +42,8 @@ if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 
         $err = 'Nazwa i e-mail są wymagane.';
     } elseif (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
         $err = 'Nieprawidłowy adres e-mail.';
+    } elseif (!in_array($data['gender'], ['M', 'K', ''], true)) {
+        $err = 'Nieprawidłowa płeć.';
     } else {
         foreach ($max as $field => $len) {
             if (mb_strlen($data[$field]) > $len) {
@@ -50,11 +53,18 @@ if ($canManage && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 
         }
     }
 
+    // Logowanie klienta szuka po e-mailu, więc duplikaty są niedozwolone
+    if ($err === '') {
+        $c = $pdo->prepare('SELECT 1 FROM customer WHERE email = ?');
+        $c->execute([$data['email']]);
+        if ($c->fetch()) $err = 'Ten email jest już zarejestrowany.';
+    }
+
     if ($err === '') {
         try {
             $stmt = $pdo->prepare(
                 "INSERT INTO customer (name, nip, email, phone, city, country, gender)
-                 VALUES (:name, :nip, :email, :phone, :city, :country, 'M')"
+                 VALUES (:name, :nip, :email, :phone, :city, :country, :gender)"
             );
             $stmt->execute($data);
             header('Location: klienci.php');
@@ -112,7 +122,7 @@ include 'szablony/naglowek.php';
     <div class="card-header">Dodaj nowego klienta</div>
     <div class="card-body">
         <form method="post" class="row g-3">
-        <?php echo csrf_field(); ?>
+            <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="add">
             <div class="col-md-4">
                 <input type="text" name="name" class="form-control" maxlength="50" placeholder="Nazwa / Imię i Nazwisko *" required>
@@ -126,11 +136,18 @@ include 'szablony/naglowek.php';
             <div class="col-md-2">
                 <input type="text" name="phone" class="form-control" maxlength="25" placeholder="Telefon">
             </div>
-            <div class="col-md-5">
+            <div class="col-md-4">
                 <input type="text" name="city" class="form-control" maxlength="30" placeholder="Miasto">
             </div>
-            <div class="col-md-5">
+            <div class="col-md-3">
                 <input type="text" name="country" class="form-control" maxlength="30" placeholder="Kraj">
+            </div>
+            <div class="col-md-3">
+                <select name="gender" class="form-select">
+                    <option value="">Płeć (nie podano)</option>
+                    <option value="M">Mężczyzna</option>
+                    <option value="K">Kobieta</option>
+                </select>
             </div>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-success w-100">Dodaj</button>
@@ -178,7 +195,7 @@ include 'szablony/naglowek.php';
                         <?php if ($canManage): ?>
                             <td>
                                 <form method="post" class="d-inline" onsubmit="return confirm('Na pewno usunąć klienta?');">
-        <?php echo csrf_field(); ?>
+                                    <?php echo csrf_field(); ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="id" value="<?php echo (int)$c['id']; ?>">
                                     <button class="btn btn-sm btn-outline-danger">Usuń</button>
